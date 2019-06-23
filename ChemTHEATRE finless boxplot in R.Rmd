@@ -1,0 +1,117 @@
+---
+title: "ChemTHEATRE スナメリデータ・クリーニングから作図まで"
+author: "Akifumi Eguchi"
+date: "2019/6/23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### ライブラリ読み込み
+```{r library}
+library(tidyverse)
+library(DT)
+library(sessioninfo)
+```
+
+### データ読み込み
+```{r data import, message=FALSE}
+#ChemTHEATREからダウンロードしてきたスナメリデータの読み込み
+#読み込むファイルの名前はダウンロードしてきたものに合わせて適宜変更すること
+
+chm.data <- read_tsv("measureddata_20190622140143.tsv") %>%
+  select(-c("ProjectID", "ScientificName", "RegisterDate", "UpdateDate")) # sample.dataと重複する列の削除
+
+sample.data <- read_tsv("samples_20190622140137.tsv")
+```
+今回はスナメリの測定データをダウンロードしたものを利用する。
+`read_tsv()`関数を使ってデータを読み込む。
+読み込んだデータの中からchm.data, sample.dataで重複する列は`select()`関数を使って先に落としておく。
+
+### データ前処理
+```{r merge, message=FALSE}
+#chm.dataとsample.dataをサンプルIDでマージ
+merged.data <- chm.data %>% left_join(sample.data, by= "SampleID")
+```
+まず2つのデータを結合する。`chm.data`をベースに動かしていきたいので、`chm.data`に`left_join()`関数を使い、共通するサンプルIDをキーにして結合する。
+
+```{r data cleaning1, message=FALSE}
+#不要な変数削除/ wet・fatの分割・totalのデータに絞り込むなど
+marged.total.lipid <- merged.data %>% 
+                      filter(Unit == "ng/g lipid") %>% #脂肪重量データ抽出
+                      filter(str_detect(ChemicalName, "Σ")) %>%  # sumではじまるものを抽出
+                      filter(!ChemicalName %in% c("ΣOH-penta-PCB", "ΣOH-hexa-PCB", "ΣOH-hepta-PCB", "ΣOH-octa-PCB")) #個別要素の削除
+                      
+
+marged.total.wet <- merged.data %>% 
+                    filter(Unit == "ng/g wet") %>%  #wet重量データ抽出
+                    filter(str_detect(ChemicalName, "Σ")) %>%  # sumではじまるものを抽出
+                    filter(!ChemicalName %in% c("ΣOH-penta-PCB", "ΣOH-hexa-PCB", "ΣOH-hepta-PCB", "ΣOH-octa-PCB")) #個別要素の削除
+
+marged.total.wet$MeasuredValue[marged.total.wet$MeasuredValue < 0.05] <- 0.05 #log変換したいので0を埋めておく
+```
+続いてデータのクリーニングを行う。まず、化学物質の濃度の単位が格納されている`Unit`列を見てみると、ng/g lipid, ng/g wetの2つの濃度単位のデータがあることがわかる。異なる濃度単位のデータを比較するのはあまりイケていないので、`filter()`関数を使っていずれかの単位に絞り込み位をかけておく。これによりlipid, wetベースそれぞれのデータを作ることができる。  
+続いて`ChemicalName`列に注目する。ここには様々な化学物質の個別異性体、各化学物質の名前が格納されており`MeasuredValue`列に格納されている濃度データと紐付いている。最初に図を作る段階では個別異性体のデータは細かすぎるので、合計値を表すΣを含む`ChemicalName`を`str_detect()`関数を使って抽出する。ただ、これをやると水酸化PCBの塩素数合計値も合わせて引っかかってしまうので、`ChemicalName`に塩素数合計値である"ΣOH-penta-PCB", "ΣOH-hexa-PCB", "ΣOH-hepta-PCB", "ΣOH-octa-PCB"を含まないデータのみに絞り込む。  
+これで大まかにデータは絞り込めたが、wet重量あたりの`MeasuredValue`列を確認してみると濃度0のデータが複数含まれていることがわかる。化学物質濃度は物によってかなり幅があるため、作図の際には対数表示で示すことが多い。しかし0は対数変換できないので、ひとまず最低濃度の半分程度である0.05の値を代入しておく。
+
+```{r data cleaning2, message=FALSE}
+is_blank <- function(x) {is.na(x) | x == ""}
+
+#すべてがNAの列を削除
+unnecessary_col <- apply(marged.total.lipid, 2,
+                         function(x){
+                           all(is_blank(x))
+                         })
+
+marged.total.lipid <- marged.total.lipid[, !unnecessary_col]
+
+unnecessary_col <- apply(marged.total.wet, 2,
+                         function(x){
+                           all(is_blank(x))
+                         })
+
+marged.total.wet <- marged.total.wet[, !unnecessary_col]
+```
+つづいてNAばかりの列を削除しておく。このコードは[Rで空行・空列を除去する方法](https://id.fnshr.info/2017/08/14/r-blank-row-col/)を参考にした。
+
+
+### データの概観チェック
+```{r data summary1, message=FALSE}
+datatable(marged.total.lipid, 
+    extensions = 'FixedColumns',
+    options = list(
+    dom = 't',
+    scrollX = TRUE,
+    scrollCollapse = TRUE)
+  )
+```
+
+```{r data summary2, message=FALSE}
+datatable(marged.total.wet, 
+    extensions = 'FixedColumns',
+    options = list(
+    dom = 't',
+    scrollX = TRUE,
+    scrollCollapse = TRUE)
+  )
+```
+
+`DT`パッケージの`datatable()`関数を使い、htmlファイル上でインタラクティブに動かす事ができるテーブルを出力しておく。これにより、加工したデータの最終型の概観を簡単に確認できる。`datatable()`関数については[DTでインタラクティブな表作り](https://kazutan.github.io/SappoRoR5/DT_demo.html)に詳しい。
+
+### 可視化
+```{r lipid conc, message=FALSE}
+ggplot(marged.total.lipid, aes(x = ChemicalName, y = log10(MeasuredValue), fill = ChemicalName)) +
+  geom_boxplot() +
+  geom_jitter()
+```
+
+
+```{r wet conc, message=FALSE}
+ggplot(marged.total.wet, aes(x = ChemicalName, y = log10(MeasuredValue), fill = ChemicalName)) +
+  geom_boxplot() +
+  geom_jitter()
+```
+
+化合物名はアルファベット順で表記した。可視化には`tidyverse`パッケージ群の1つである`ggplot2`パッケージを用いた。x軸は`ChemicalName`、y軸は`MeasuredValue`とするが、y軸は`log10()`を使って対数表記にしておく。色はfillで指定する。あとは`geom_boxplot()`で箱ひげ図が、`geom_jitter()`でその上に個別検体の濃度をプロットすることができる。
