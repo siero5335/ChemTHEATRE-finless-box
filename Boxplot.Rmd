@@ -2,7 +2,6 @@
 title: "ChemTHEATRE スナメリデータ・クリーニングから作図まで"
 author: "Akifumi Eguchi"
 date: "2019/6/23"
-output: html_document
 ---
 
 ```{r setup, include=FALSE}

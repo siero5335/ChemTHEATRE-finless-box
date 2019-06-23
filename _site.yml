@@ -1,0 +1,9 @@
+name: "ChemTHEATRE Finless data"
+navbar:
+  title: "ChemTHEATRE Finless data"
+  left:
+    - text: "index"
+      href: index.html
+    - text: "Boxplot"
+      href: Boxplot.html
+output_dir: "docs"
